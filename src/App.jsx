@@ -296,7 +296,6 @@ export default function SchemaExplorer() {
   const [brokenAutos, setBrokenAutos] = useState(new Set()); // auto-connections user removed
   const [annotations, setAnnotations] = useState({});
   const [zoom, setZoom] = useState(0.45);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [showAuto, setShowAuto] = useState(true);
   const [showUser, setShowUser] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -305,12 +304,9 @@ export default function SchemaExplorer() {
   const [movingTable, setMovingTable] = useState(null);
   const [moveOffset, setMoveOffset] = useState({ x: 0, y: 0 });
   // Drag-to-connect
-  const [connectFrom, setConnectFrom] = useState(null); // { colKey, tableKey, idx }
+  const [connectFrom, setConnectFrom] = useState(null);
   const [dragLine, setDragLine] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
-  // Pan
-  const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -355,8 +351,9 @@ export default function SchemaExplorer() {
     return result;
   }, [searchQuery]);
 
-  // ── Zoom ──
+  // ── Zoom (Ctrl+scroll only — plain scroll = normal page scroll) ──
   const handleWheel = useCallback((e) => {
+    if (!e.ctrlKey && !e.metaKey) return; // let normal scroll through
     e.preventDefault();
     const d = e.deltaY > 0 ? -0.04 : 0.04;
     setZoom(z => Math.max(0.1, Math.min(2, z + d)));
@@ -375,8 +372,12 @@ export default function SchemaExplorer() {
     setSelectedTable(tableKey);
     const p = positions[tableKey] || { x: 0, y: 0 };
     setMovingTable(tableKey);
-    setMoveOffset({ x: (e.clientX - pan.x) / zoom - p.x, y: (e.clientY - pan.y) / zoom - p.y });
-  }, [positions, zoom, pan]);
+    // Account for scroll position + zoom when calculating offset
+    const container = containerRef.current;
+    const scrollX = container ? container.scrollLeft : 0;
+    const scrollY = container ? container.scrollTop : 0;
+    setMoveOffset({ x: (e.clientX + scrollX) / zoom - p.x, y: (e.clientY + scrollY) / zoom - p.y });
+  }, [positions, zoom]);
 
   const handleDotMouseDown = useCallback((e, colKey, tableKey, colIdx) => {
     const pos = positions[tableKey];
@@ -405,39 +406,35 @@ export default function SchemaExplorer() {
   const handleCanvasMouseDown = useCallback((e) => {
     if (e.target === containerRef.current || e.target === canvasRef.current || e.target.tagName === "svg") {
       setSelectedTable(null);
-      setIsPanning(true);
-      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
     }
-  }, [pan]);
+  }, []);
 
   const handleMouseMove = useCallback((e) => {
+    const container = containerRef.current;
+    const scrollX = container ? container.scrollLeft : 0;
+    const scrollY = container ? container.scrollTop : 0;
     // Move table
     if (movingTable) {
-      const x = (e.clientX - pan.x) / zoom - moveOffset.x;
-      const y = (e.clientY - pan.y) / zoom - moveOffset.y;
+      const x = (e.clientX + scrollX) / zoom - moveOffset.x;
+      const y = (e.clientY + scrollY) / zoom - moveOffset.y;
       setPositions(p => ({ ...p, [movingTable]: { x, y } }));
       return;
     }
     // Drag connection line
     if (connectFrom) {
-      const rect = canvasRef.current?.getBoundingClientRect();
+      const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
-        const x = (e.clientX - rect.left) / zoom;
-        const y = (e.clientY - rect.top) / zoom;
+        const x = (e.clientX - rect.left + scrollX) / zoom;
+        const y = (e.clientY - rect.top + scrollY) / zoom;
         setDragLine(prev => prev ? { ...prev, x2: x, y2: y } : null);
       }
       return;
     }
-    // Pan canvas
-    if (isPanning) {
-      setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
-    }
-  }, [movingTable, moveOffset, connectFrom, isPanning, panStart, zoom, pan]);
+  }, [movingTable, moveOffset, connectFrom, zoom]);
 
   const handleMouseUp = useCallback(() => {
     setMovingTable(null);
     if (connectFrom) { setConnectFrom(null); setDragLine(null); setDragOverCol(null); }
-    setIsPanning(false);
   }, [connectFrom]);
 
   // Stats
@@ -465,7 +462,7 @@ export default function SchemaExplorer() {
           <button className="px-1.5 py-0.5 rounded" style={{ fontSize: 12, background: "#252535", color: "#999" }} onClick={() => setZoom(z => Math.max(0.1, z - 0.1))}>−</button>
           <span style={{ fontSize: 9, color: "#666", minWidth: 36, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
           <button className="px-1.5 py-0.5 rounded" style={{ fontSize: 12, background: "#252535", color: "#999" }} onClick={() => setZoom(z => Math.min(2, z + 0.1))}>+</button>
-          <button className="px-2 py-0.5 rounded" style={{ fontSize: 9, background: "#252535", color: "#666" }} onClick={() => { setZoom(0.45); setPan({ x: 0, y: 0 }); }}>Fit</button>
+          <button className="px-2 py-0.5 rounded" style={{ fontSize: 9, background: "#252535", color: "#666" }} onClick={() => { setZoom(0.45); if (containerRef.current) { containerRef.current.scrollTop = 0; containerRef.current.scrollLeft = 0; } }}>Fit</button>
 
           <span style={{ color: "#333", margin: "0 4px" }}>|</span>
 
@@ -493,9 +490,9 @@ export default function SchemaExplorer() {
         <span style={{ color: "#666" }}>·</span>
         <span style={{ color: "#666" }}>Drag dot → dot = connect columns</span>
         <span style={{ color: "#666" }}>·</span>
-        <span style={{ color: "#666" }}>Scroll = zoom</span>
+        <span style={{ color: "#666" }}>Ctrl+Scroll = zoom</span>
         <span style={{ color: "#666" }}>·</span>
-        <span style={{ color: "#666" }}>Drag canvas = pan</span>
+        <span style={{ color: "#666" }}>Scroll = navigate</span>
         <div className="flex items-center gap-3 ml-auto">
           <span className="flex items-center gap-1"><span style={{ width: 12, height: 2, background: "#60a5fa", display: "inline-block", borderRadius: 1, opacity: 0.5 }} /> <span style={{ color: "#60a5fa" }}>auto (same name)</span></span>
           <span className="flex items-center gap-1"><span style={{ width: 12, height: 2, background: "#22c55e", display: "inline-block", borderRadius: 1 }} /> <span style={{ color: "#22c55e" }}>manual</span></span>
@@ -503,12 +500,11 @@ export default function SchemaExplorer() {
         </div>
       </div>
 
-      {/* ── Canvas ── */}
+      {/* ── Canvas — native scroll + zoom ── */}
       <div
         ref={containerRef}
-        className="flex-1 relative overflow-hidden"
-        style={{ cursor: isPanning ? "grabbing" : connectFrom ? "crosshair" : "grab" }}
-        onMouseDown={handleCanvasMouseDown}
+        className="flex-1 relative"
+        style={{ overflow: "auto", cursor: connectFrom ? "crosshair" : "default" }}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
@@ -516,13 +512,16 @@ export default function SchemaExplorer() {
         <div
           ref={canvasRef}
           style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transform: `scale(${zoom})`,
             transformOrigin: "0 0",
-            position: "absolute",
-            width: "10000px",
-            height: "10000px",
+            position: "relative",
+            width: `${10000 * zoom}px`,
+            height: `${10000 * zoom}px`,
+            minWidth: "100%",
+            minHeight: "100%",
           }}
         >
+          <div style={{ width: "10000px", height: "10000px", position: "absolute", top: 0, left: 0 }}>
           <SchemaLabels positions={positions} />
           <ConnectionsSVG connections={allConnections} positions={positions} dragLine={dragLine} />
           {visibleTables.map(({ key, table }) => (
@@ -540,6 +539,7 @@ export default function SchemaExplorer() {
               annotations={annotations}
             />
           ))}
+          </div>
         </div>
       </div>
 
