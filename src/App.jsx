@@ -15,7 +15,7 @@ Object.entries(TABLES_ONLY).forEach(([key, val]) => {
   SCHEMAS[val.schema][val.name] = val;
 });
 
-const SCHEMA_ORDER = Object.keys(SCHEMAS).sort();
+const SCHEMA_ORDER = ["canonical", "finance"];
 
 // Columns to SKIP for auto-connections (PKs and metadata — not real joins)
 const AUTO_SKIP = new Set([
@@ -296,7 +296,6 @@ export default function SchemaExplorer() {
   const [brokenAutos, setBrokenAutos] = useState(new Set()); // auto-connections user removed
   const [annotations, setAnnotations] = useState({});
   const [zoom, setZoom] = useState(0.45);
-  const [showAuto, setShowAuto] = useState(true);
   const [showUser, setShowUser] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTable, setSelectedTable] = useState(null);
@@ -313,30 +312,12 @@ export default function SchemaExplorer() {
   // Init layout
   useEffect(() => { setPositions(computeLayout()); }, []);
 
-  // Auto-connections
-  const autoConnections = useMemo(() => {
-    const all = computeAutoConnections();
-    return all.filter(c => !brokenAutos.has(`${c.from}|${c.to}`));
-  }, [brokenAutos]);
-
-  // All connections
+  // All connections — user-drawn only, no auto
   const allConnections = useMemo(() => {
-    let c = [];
-    if (showAuto) c = c.concat(autoConnections);
-    if (showUser) c = c.concat(userConnections);
-    return c;
-  }, [showAuto, showUser, autoConnections, userConnections]);
+    return showUser ? userConnections : [];
+  }, [showUser, userConnections]);
 
-  // Which column names are "shared" across tables (for highlighting)
-  const sharedColumns = useMemo(() => {
-    const counts = {};
-    Object.values(TABLES_ONLY).forEach(t => {
-      t.columns.forEach(c => {
-        if (!AUTO_SKIP.has(c.name)) counts[c.name] = (counts[c.name] || 0) + 1;
-      });
-    });
-    return new Set(Object.entries(counts).filter(([, n]) => n >= 2).map(([k]) => k));
-  }, []);
+  const sharedColumns = new Set(); // no auto-highlighting
 
   // Visible tables
   const visibleTables = useMemo(() => {
@@ -466,15 +447,7 @@ export default function SchemaExplorer() {
 
           <span style={{ color: "#333", margin: "0 4px" }}>|</span>
 
-          {/* Connection toggles */}
-          <label className="flex items-center gap-1 cursor-pointer" style={{ fontSize: 9 }}>
-            <input type="checkbox" checked={showAuto} onChange={e => setShowAuto(e.target.checked)} style={{ width: 10, height: 10 }} />
-            <span style={{ color: "#60a5fa" }}>Auto ({autoConnections.length})</span>
-          </label>
-          <label className="flex items-center gap-1 cursor-pointer" style={{ fontSize: 9 }}>
-            <input type="checkbox" checked={showUser} onChange={e => setShowUser(e.target.checked)} style={{ width: 10, height: 10 }} />
-            <span style={{ color: "#22c55e" }}>Manual ({userConnections.length})</span>
-          </label>
+          <span style={{ fontSize: 9, color: "#22c55e" }}>{userConnections.length} connections</span>
 
           {userConnections.length > 0 && (
             <button className="px-2 py-0.5 rounded" style={{ fontSize: 9, color: "#f87171", background: "#f8717111" }} onClick={() => setUserConnections(p => p.slice(0, -1))}>
@@ -485,19 +458,14 @@ export default function SchemaExplorer() {
       </div>
 
       {/* ── Legend ── */}
-      <div className="flex items-center gap-4 px-3 py-1 border-b border-gray-800/40" style={{ background: "#0c0c1a", fontSize: 9 }}>
-        <span style={{ color: "#666" }}>Drag header = move table</span>
-        <span style={{ color: "#666" }}>·</span>
-        <span style={{ color: "#666" }}>Drag dot → dot = connect columns</span>
-        <span style={{ color: "#666" }}>·</span>
-        <span style={{ color: "#666" }}>Ctrl+Scroll = zoom</span>
-        <span style={{ color: "#666" }}>·</span>
-        <span style={{ color: "#666" }}>Scroll = navigate</span>
-        <div className="flex items-center gap-3 ml-auto">
-          <span className="flex items-center gap-1"><span style={{ width: 12, height: 2, background: "#60a5fa", display: "inline-block", borderRadius: 1, opacity: 0.5 }} /> <span style={{ color: "#60a5fa" }}>auto (same name)</span></span>
-          <span className="flex items-center gap-1"><span style={{ width: 12, height: 2, background: "#22c55e", display: "inline-block", borderRadius: 1 }} /> <span style={{ color: "#22c55e" }}>manual</span></span>
-          <span className="flex items-center gap-1"><span style={{ width: 8, height: 8, borderRadius: "50%", border: "2px solid #fbbf24", display: "inline-block" }} /> <span style={{ color: "#fbbf24" }}>shared column</span></span>
-        </div>
+      <div className="flex items-center gap-4 px-3 py-1 border-b border-gray-800/40" style={{ background: "#0c0c1a", fontSize: 9, color: "#555" }}>
+        <span>Drag header = move</span>
+        <span>·</span>
+        <span>Drag dot → dot = connect</span>
+        <span>·</span>
+        <span>Ctrl+Scroll = zoom</span>
+        <span>·</span>
+        <span>Scroll = navigate</span>
       </div>
 
       {/* ── Canvas — native scroll + zoom ── */}
@@ -545,8 +513,8 @@ export default function SchemaExplorer() {
 
       {/* ── Status bar ── */}
       <div className="flex items-center gap-4 px-3 py-1 border-t border-gray-800/50" style={{ background: "#0e0e20", fontSize: 9, color: "#555" }}>
-        <span>{visibleTables.length} tables</span>
-        <span>{autoConnections.length} auto + {userConnections.length} manual connections</span>
+        <span>{visibleTables.length} tables (canonical + finance)</span>
+        <span>{userConnections.length} connections</span>
         <span>Zoom {Math.round(zoom * 100)}%</span>
       </div>
     </div>
